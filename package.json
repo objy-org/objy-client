@@ -1,0 +1,56 @@
+{
+  "name": "@objy/client",
+  "version": "0.1.0-alpha.0",
+  "description": "Dependency-free JavaScript client for OBJY DB servers.",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:integration": "node --test integration/*.test.js",
+    "test:browser": "playwright test",
+    "test:all": "npm test && npm run test:integration && npm run test:browser",
+    "check:package": "npm pack --dry-run"
+  },
+  "keywords": [
+    "objy",
+    "database",
+    "client",
+    "http",
+    "browser",
+    "node"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "author": "SPOO Technologies",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objy-org/objy-client.git"
+  },
+  "bugs": {
+    "url": "https://github.com/objy-org/objy-client/issues"
+  },
+  "homepage": "https://github.com/objy-org/objy-client#readme",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}
