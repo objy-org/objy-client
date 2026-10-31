@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createClient, ObjyDBError } from '../index.js';
-import { clientPath, createFileService, sign, startServer } from './server-runtime.js';
+import { createFileService, sign, startServer } from './server-runtime.js';
 
 const secret = 'client-test-secret';
 const expired = token => sign({ ...JSON.parse(Buffer.from(token.split('.')[1], 'base64url')), exp: 1 }, secret);
@@ -203,14 +203,8 @@ test('non-replayable streams fail explicitly; factories allow safe retry', async
   assert.equal(factories, 2);
 });
 
-test('served module caching, package exports, configured CORS and preflight', async t => {
+test('configured CORS permits approved preflight and rejects other origins', async t => {
   const { url } = await setup(t, { cors: { origins: ['https://app.example'] } });
-  const module = await fetch(url + '/client.js', { headers: { origin: 'https://app.example' } });
-  assert.match(module.headers.get('content-type'), /javascript/);
-  assert.equal(module.headers.get('access-control-allow-origin'), 'https://app.example');
-  assert.match(await module.text(), /export function createClient/);
-  assert.equal((await fetch(url + '/client.js', { headers: { 'if-none-match': module.headers.get('etag') } })).status, 304);
-  assert.match((await fetch(url + clientPath)).headers.get('cache-control'), /immutable/);
   const preflight = await fetch(url + '/api/a/items/object', { method: 'OPTIONS', headers: {
     origin: 'https://app.example', 'access-control-request-method': 'PATCH', 'access-control-request-headers': 'authorization,content-type',
   } });

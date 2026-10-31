@@ -183,19 +183,12 @@ test('independent clients keep login, renewal and logout state isolated', async 
   assert.equal(other.getSession().database, snapshot.database);
 });
 
-test('native browser module HEAD, ETag and CORS denials follow the public contract', async t => {
+test('CORS rejects unapproved request headers', async t => {
   const { url } = await setup(t, { cors: { origins: ['https://allowed.example'] } });
-  const head = await fetch(url + '/client.js', { method: 'HEAD' });
-  assert.equal(head.status, 200); assert.equal(await head.text(), '');
-  assert.ok(head.headers.get('etag')); assert.match(head.headers.get('link'), /client\/.+\.js/);
-  const unchanged = await fetch(url + '/client.js', { headers: { 'if-none-match': head.headers.get('etag') } });
-  assert.equal(unchanged.status, 304); assert.equal(await unchanged.text(), '');
   const denied = await fetch(url + '/api/test/items/object', { method: 'OPTIONS', headers: {
     origin: 'https://allowed.example', 'access-control-request-method': 'POST', 'access-control-request-headers': 'x-not-allowed',
   } });
   assert.equal(denied.status, 403);
-  const unknown = await fetch(url + '/client/not-a-current-hash.js');
-  assert.equal(unknown.status, 404);
 });
 
 test('redirected authenticated writes never reach a second origin', async t => {

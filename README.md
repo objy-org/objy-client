@@ -1,14 +1,16 @@
 # OBJY Client
 
-<p align="center"><strong>One client. Browser and Node. No runtime dependencies.</strong></p>
+<p align="center"><strong>The small, dependency-free client for OBJY DB.</strong></p>
 
-The OBJY DB client is a small ES module over the public HTTP API. It handles URLs, authentication, token renewal, queries, bulk imports, files, cancellation, and native server errors without adding an ORM or hiding database behavior.
+`@objy/client` connects browser and Node.js applications to a running OBJY DB server. It handles authentication, token renewal, database and collection context, queries, bulk imports, files, cancellation, and native server errors without adding an ORM or hiding database behavior.
 
-[Quick start](#quick-start) | [API reference](https://github.com/objy-org/objy/blob/main/API.md) | [OBJY DB](https://github.com/objy-org/objy)
+Use this package when an application talks to OBJY DB over HTTP. To run the database directly inside an application or browser, use [`@objy/db`](https://github.com/objy-org/objy) instead.
 
-## Quick Start
+[Install and connect](#install-and-connect) | [HTTP API](https://github.com/objy-org/objy/blob/main/API.md) | [OBJY DB](https://github.com/objy-org/objy)
 
-### Node and Bundlers
+## Install and Connect
+
+The same package and import work in Node.js and browser applications. Browser projects use their normal bundler or build tool.
 
 ```sh
 npm install @objy/client
@@ -20,7 +22,11 @@ import { createClient } from '@objy/client';
 const client = createClient({ url: 'http://127.0.0.1:8080' });
 await client.login({ username: 'admin', password: 'your-password' });
 
-const items = client.database('app').collection('items');
+await client.createDatabase('app');
+const app = client.database('app');
+await app.createCollection('items');
+
+const items = app.collection('items');
 
 await items.insert({ _id: 'hello', title: 'Hello' });
 console.log(await items.get('hello'));
@@ -28,25 +34,7 @@ console.log(await items.get('hello'));
 
 `@objy/client` has no runtime dependencies. It never starts a database server or loads server code.
 
-### Browser
-
-This is the HTTP client for a running OBJY DB server. For a local database running entirely in the browser, install and import `@objy/db` instead.
-
-Every OBJY DB node serves the client at `/client.js` without authentication:
-
-```html
-<script type="module">
-  import { createClient } from '/client.js';
-
-  const client = createClient();
-  await client.login({ username: 'admin', password: 'your-password' });
-
-  const items = client.database('app').collection('items');
-  console.log(await items.find({ status: 'active' }));
-</script>
-```
-
-When loaded from `/client.js`, the default server URL is derived from the module URL, including a reverse-proxy path prefix. Bundled or copied clients should pass `url` explicitly.
+> **No-build browsers:** the published ES module can also be imported through a direct package URL. This is an alternative delivery method for the same client, not a separate browser version. OBJY DB servers do not expose a client script.
 
 ## The Client Model
 
@@ -56,7 +44,7 @@ client
     collection("items")
 ```
 
-Database and collection handles are immutable. Creating a handle does not change global context, so one client can safely work across many databases and collections.
+Database and collection handles are immutable. Creating a handle does not create that database or collection and does not change global context, so one client can safely work across many contexts.
 
 ```js
 const app = client.database('app');
@@ -85,7 +73,7 @@ Methods return native server results:
 | Files | `insertFile`, `replaceFile`, `download` |
 | Metadata | `getMeta`, `setMeta`, `drop` |
 
-## Context and CRUD
+## Databases, Collections, and Objects
 
 ```js
 await client.createDatabase('app', {
@@ -181,7 +169,7 @@ await items.patchMany([
 await items.removeMany(['one', 'two']);
 ```
 
-For large writes, `import` sends NDJSON and keeps the server's bounded, bulk-first path:
+For large writes, `import` uses NDJSON and can stream sources without converting them into one large JSON array:
 
 ```js
 await items.import(new Blob([
@@ -321,21 +309,6 @@ server: {
 ```
 
 CORS is disabled by default. Preflight permits `Authorization`, `Content-Type`, and `Prefer`; configure extra request headers with `cors.headers`. Authentication uses bearer tokens, not cookies.
-
-`/client.js` supports ETag revalidation. Its `Link` header identifies an immutable `/client/<content-hash>.js` URL. A server exposes only its current hash, so deployments pinning older versions must retain those files in their own static hosting or cache.
-
-## Deliberate Boundaries
-
-The client does not add:
-
-- Transactions.
-- Realtime subscriptions.
-- Server-side session revocation.
-- Private cluster or replication operations.
-- Automatic transport retries for writes.
-- Hidden global database or collection context.
-
-It stays thin on purpose: the server owns data semantics, permissions, routing, durability, and query planning.
 
 ## Development
 

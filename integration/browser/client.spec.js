@@ -1,8 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { clientPath, createFileService, sign, startServer } from '../server-runtime.js';
+import { createFileService, sign, startServer } from '../server-runtime.js';
 
 let server, app, base, appUrl, renewals;
+const clientSource = await readFile(new URL('../../index.js', import.meta.url));
+const versionedClientPath = '/client/test-version.js';
 const secret = 'browser-client-secret';
 const auth = { jwtSecret: secret, users: [{ _id: 'admin', username: 'admin', password: '123', role: 'admin', admin: true }] };
 
@@ -11,7 +14,16 @@ test.beforeAll(async () => {
   server = await startServer({ auth, cors: { origins: ['*'] }, files: createFileService({ mode: 'memory' }) });
   server.server.on('request', req => { if (req.method === 'POST' && req.url.endsWith('/renew')) renewals++; });
   base = `http://127.0.0.1:${server.port}`;
-  app = createServer((_req, res) => { res.setHeader('content-type', 'text/html'); res.end('<!doctype html><title>Client integration test</title>'); });
+  app = createServer((req, res) => {
+    const path = new URL(req.url, 'http://localhost').pathname;
+    if (/\/client(?:\/[^/]+)?\.js$/.test(path)) {
+      res.setHeader('content-type', 'text/javascript; charset=utf-8');
+      res.end(clientSource);
+      return;
+    }
+    res.setHeader('content-type', 'text/html');
+    res.end('<!doctype html><title>Client integration test</title>');
+  });
   await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
   appUrl = `http://127.0.0.1:${app.address().port}`;
 });
@@ -23,14 +35,14 @@ test.afterAll(async () => {
 
 async function connect(page, path = '/client.js') {
   await page.goto(appUrl);
-  await page.evaluate(async url => {
-    const { createClient } = await import(url);
-    window.client = createClient();
+  await page.evaluate(async ({ moduleUrl, serverUrl }) => {
+    const { createClient } = await import(moduleUrl);
+    window.client = createClient({ url: serverUrl });
     await client.login({ username: 'admin', password: '123' });
-  }, base + path);
+  }, { moduleUrl: appUrl + path, serverUrl: base });
 }
 
-test('cross-origin URL import, CRUD, search, bulk, pagination, metadata and isolation', async ({ page }) => {
+test('browser module import with cross-origin API, CRUD, search, bulk, pagination, metadata and isolation', async ({ page }) => {
   await connect(page);
   const result = await page.evaluate(async () => {
     await client.createDatabase('browser');
@@ -52,7 +64,7 @@ test('cross-origin URL import, CRUD, search, bulk, pagination, metadata and isol
 });
 
 test('expired access token renews once across simultaneous browser writes', async ({ page }) => {
-  await connect(page, clientPath);
+  await connect(page, versionedClientPath);
   const session = await page.evaluate(() => client.getSession());
   session.accessToken = sign({ ...JSON.parse(Buffer.from(session.accessToken.split('.')[1], 'base64url')), exp: 1 }, secret);
   const initial = renewals;
@@ -113,6 +125,10 @@ test('imported module infers a reverse-proxy prefix with both URL forms', async 
   await page.route(appUrl + '/proxy/**', async route => {
     const path = new URL(route.request().url()).pathname;
     paths.push(path);
+    if (/\/client(?:\/[^/]+)?\.js$/.test(path)) {
+      await route.fulfill({ body: clientSource, contentType: 'text/javascript; charset=utf-8' });
+      return;
+    }
     const response = await route.fetch({ url: base + route.request().url().slice((appUrl + '/proxy').length) });
     await route.fulfill({ response });
   });
@@ -128,7 +144,7 @@ test('imported module infers a reverse-proxy prefix with both URL forms', async 
       ids.push((await items.get(String(index)))._id);
     }
     return ids;
-  }, [appUrl + '/proxy/client.js', appUrl + '/proxy' + clientPath]);
+  }, [appUrl + '/proxy/client.js', appUrl + '/proxy' + versionedClientPath]);
   expect(result).toEqual(['0', '1']);
   expect(paths.filter(path => path.includes('/auth'))).toEqual(['/proxy/api/_global/users/auth', '/proxy/api/_global/users/auth']);
   expect(paths.some(path => path === '/proxy/api/proxy/items/object/1')).toBe(true);
@@ -136,10 +152,10 @@ test('imported module infers a reverse-proxy prefix with both URL forms', async 
 
 test('browser deadlines cover factories, response parsing and cancellation before dispatch', async ({ page }) => {
   await connect(page);
-  const result = await page.evaluate(async url => {
-    const { createClient } = await import(url);
+  const result = await page.evaluate(async ({ moduleUrl, serverUrl }) => {
+    const { createClient } = await import(moduleUrl);
     let calls = 0;
-    const client = createClient({ url, fetch: async (_url, { signal }) => {
+    const client = createClient({ url: serverUrl, fetch: async (_url, { signal }) => {
       calls++;
       return new Response(new ReadableStream({ start(controller) {
         signal.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true });
@@ -152,7 +168,7 @@ test('browser deadlines cover factories, response parsing and cancellation befor
     const factory = await outcome(items.import(() => new Promise(() => {}), { timeoutMs: 20 }));
     const body = await outcome(items.insert({}, { timeoutMs: 20 }));
     return { cancelled, factory, body, calls };
-  }, base + '/client.js');
+  }, { moduleUrl: appUrl + '/client.js', serverUrl: base });
   expect(result).toEqual({ cancelled: { code: 'ABORTED', uncertain: false }, factory: { code: 'TIMEOUT', uncertain: false }, body: { code: 'TIMEOUT', uncertain: true }, calls: 1 });
 });
 
