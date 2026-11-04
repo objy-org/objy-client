@@ -18,36 +18,89 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: objy-client-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: npm
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       NPM_TAG: ${{ inputs.npm_tag }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: objy-org/objy
+          path: .server-source
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Validate release request
+        run: |
+          if [[ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]]; then
+            echo "Releases must run from the default branch: $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version must be an explicit semantic version without a v prefix" >&2
+            exit 1
+          fi
+      - name: Use trusted-publishing npm CLI
+        run: npm install --global npm@12.2.1
       - run: npm ci
-      - run: npm test
+      - run: npm ci
+        working-directory: .server-source
+      - run: npx playwright install --with-deps
+      - run: npm run test:all
+        env:
+          OBJY_SERVER_ROOT: ${{ github.workspace }}/.server-source
       - run: npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
+      - run: npm run check:package
       - run: npm pack
       - name: Publish npm package
-        run: npm publish --tag "$NPM_TAG" --provenance --access public
+        run: |
+          if npm view "@objy/client@$RELEASE_VERSION" version >/dev/null 2>&1; then
+            echo "@objy/client@$RELEASE_VERSION is already published"
+            npm dist-tag add "@objy/client@$RELEASE_VERSION" "$NPM_TAG"
+          else
+            npm publish --tag "$NPM_TAG" --provenance --access public
+          fi
       - name: Commit, tag, and publish GitHub release
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
-          git commit -m "Release $RELEASE_VERSION"
-          git push origin HEAD:main
-          git tag -a "v$RELEASE_VERSION" -m "OBJY Client $RELEASE_VERSION"
-          git push origin "v$RELEASE_VERSION"
-          gh release create "v$RELEASE_VERSION" objy-client-*.tgz --generate-notes --verify-tag $([[ "$RELEASE_VERSION" == *-* ]] && echo --prerelease)
+          if ! git diff --cached --quiet; then
+            git commit -m "Release $RELEASE_VERSION"
+            git push origin "HEAD:$DEFAULT_BRANCH"
+          fi
+
+          TAG="v$RELEASE_VERSION"
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            if [[ "$(git rev-list -n 1 "$TAG")" != "$(git rev-parse HEAD)" ]]; then
+              echo "Tag $TAG already points to another commit" >&2
+              exit 1
+            fi
+          else
+            git tag -a "$TAG" -m "OBJY Client $RELEASE_VERSION"
+            git push origin "refs/tags/$TAG"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" objy-client-*.tgz --clobber
+          elif [[ "$RELEASE_VERSION" == *-* ]]; then
+            gh release create "$TAG" objy-client-*.tgz --generate-notes --verify-tag --prerelease
+          else
+            gh release create "$TAG" objy-client-*.tgz --generate-notes --verify-tag
+          fi
