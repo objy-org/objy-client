@@ -34,7 +34,14 @@ console.log(await items.get('hello'));
 
 `@objy/client` has no runtime dependencies. It never starts a database server or loads server code.
 
-> **No-build browsers:** the published ES module can also be imported through a direct package URL. This is an alternative delivery method for the same client, not a separate browser version. OBJY DB servers do not expose a client script.
+> **No-build browsers:** import the same published package directly from a CDN:
+>
+> ```js
+> import { createClient } from 'https://cdn.jsdelivr.net/npm/@objy/client@0.1.0/index.js';
+> ```
+>
+> Pin the version in production. This is the same client, not a separate browser
+> build; OBJY DB servers do not expose a client script.
 
 ## The Client Model
 
